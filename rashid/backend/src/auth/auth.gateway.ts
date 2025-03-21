@@ -1,26 +1,51 @@
-import { WebSocketGateway, SubscribeMessage, MessageBody, WebSocketServer } from '@nestjs/websockets';
-import { Server } from 'ws';
+import {
+  WebSocketGateway,
+  SubscribeMessage,
+  MessageBody,
+  WebSocketServer,
+  WsResponse,
+} from '@nestjs/websockets';
+import { WebSocket } from 'ws';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 
-@WebSocketGateway()
+interface AuthResponse {
+  success: boolean;
+  message: string;
+  user?: {
+    id: string;
+    email: string;
+    name: string;
+    phone: string | null;
+    isEmailVerified: boolean;
+  };
+}
+
+@WebSocketGateway({
+  cors: {
+    origin: '*',
+  },
+  transport: WebSocket,
+})
 export class AuthGateway {
   @WebSocketServer()
-  server: Server;
+  private server: WebSocket.Server;
 
   constructor(private readonly authService: AuthService) {}
 
   @SubscribeMessage('register')
-  async handleRegister(@MessageBody() registerDto: RegisterDto) {
+  async handleRegister(
+    @MessageBody() registerDto: RegisterDto
+  ): Promise<WsResponse<AuthResponse>> {
     try {
       const user = await this.authService.register(registerDto);
       return {
         event: 'register',
         data: {
           success: true,
-          message: 'Registration successful. Please check your email for verification code.',
+          message: 'Регистрация успешна. Проверьте email для подтверждения.',
           user: {
             id: user.id,
             email: user.email,
@@ -35,21 +60,23 @@ export class AuthGateway {
         event: 'register',
         data: {
           success: false,
-          message: error.message,
+          message: error instanceof Error ? error.message : 'Произошла ошибка при регистрации',
         },
       };
     }
   }
 
   @SubscribeMessage('login')
-  async handleLogin(@MessageBody() loginDto: LoginDto) {
+  async handleLogin(
+    @MessageBody() loginDto: LoginDto
+  ): Promise<WsResponse<AuthResponse>> {
     try {
       const user = await this.authService.login(loginDto);
       return {
         event: 'login',
         data: {
           success: true,
-          message: 'Login successful',
+          message: 'Вход выполнен успешно',
           user: {
             id: user.id,
             email: user.email,
@@ -64,21 +91,23 @@ export class AuthGateway {
         event: 'login',
         data: {
           success: false,
-          message: error.message,
+          message: error instanceof Error ? error.message : 'Произошла ошибка при входе',
         },
       };
     }
   }
 
   @SubscribeMessage('verifyEmail')
-  async handleVerifyEmail(@MessageBody() verifyEmailDto: VerifyEmailDto) {
+  async handleVerifyEmail(
+    @MessageBody() verifyEmailDto: VerifyEmailDto
+  ): Promise<WsResponse<AuthResponse>> {
     try {
       const user = await this.authService.verifyEmail(verifyEmailDto);
       return {
         event: 'verifyEmail',
         data: {
           success: true,
-          message: 'Email verification successful',
+          message: 'Email успешно подтвержден',
           user: {
             id: user.id,
             email: user.email,
@@ -93,7 +122,7 @@ export class AuthGateway {
         event: 'verifyEmail',
         data: {
           success: false,
-          message: error.message,
+          message: error instanceof Error ? error.message : 'Произошла ошибка при подтверждении email',
         },
       };
     }
