@@ -1,0 +1,29 @@
+.header {
+  background-color: #333;
+  padding: 1rem;
+  color: white;
+}
+
+.header nav ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  gap: 2rem;
+}
+
+.header nav ul li a {
+  color: white;
+  text-decoration: none;
+  font-size: 1.1rem;
+  transition: color 0.3s ease;
+}
+
+.header nav ul li a:hover {
+  color: #ddd;
+}
+
+.header nav ul li a.active {
+  color: #61dafb;
+  font-weight: bold;
+} 
