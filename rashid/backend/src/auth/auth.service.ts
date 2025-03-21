@@ -1,7 +1,5 @@
 import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { User } from '../entities/user.entity';
+import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
@@ -14,8 +12,7 @@ export class AuthService {
   private transporter: nodemailer.Transporter;
 
   constructor(
-    @InjectRepository(User)
-    private readonly userRepository: Repository<User>,
+    private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
   ) {
     this.transporter = nodemailer.createTransport({
@@ -29,107 +26,112 @@ export class AuthService {
     });
   }
 
-  async register(registerDto: RegisterDto): Promise<User> {
+  async register(registerDto: RegisterDto) {
     const { email, phone } = registerDto;
 
-    // Проверяем, существует ли пользователь с таким email или телефоном
-    const existingUser = await this.userRepository.findOne({
-      where: [{ email }, { phone }],
+    const existingUser = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email },
+          { phone },
+        ],
+      },
     });
 
     if (existingUser) {
-      throw new BadRequestException('User with this email or phone already exists');
+      throw new BadRequestException('Пользователь с таким email или телефоном уже существует');
     }
 
-    // Хешируем пароль
     const hashedPassword = await bcrypt.hash(registerDto.password, 10);
-
-    // Генерируем код подтверждения
     const verificationCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     const verificationCodeExpires = new Date();
     verificationCodeExpires.setMinutes(verificationCodeExpires.getMinutes() + 10);
 
-    // Создаем нового пользователя
-    const user = this.userRepository.create({
-      ...registerDto,
-      password: hashedPassword,
-      verificationCode,
-      verificationCodeExpires,
+    const user = await this.prisma.user.create({
+      data: {
+        ...registerDto,
+        password: hashedPassword,
+        verificationCode,
+        verificationCodeExpires,
+      },
     });
 
-    await this.userRepository.save(user);
-
-    // Отправляем код подтверждения на email
     await this.sendVerificationEmail(user.email, verificationCode);
 
     return user;
   }
 
-  async login(loginDto: LoginDto): Promise<User> {
+  async login(loginDto: LoginDto) {
     const { email, phone, password } = loginDto;
 
-    // Ищем пользователя по email или телефону
-    const user = await this.userRepository.findOne({
-      where: [{ email }, { phone }],
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email },
+          { phone },
+        ],
+      },
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Неверные учетные данные');
     }
 
-    // Проверяем пароль
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Неверные учетные данные');
     }
 
     if (!user.isEmailVerified) {
-      throw new UnauthorizedException('Please verify your email first');
+      throw new UnauthorizedException('Пожалуйста, подтвердите свой email');
     }
 
     return user;
   }
 
-  async verifyEmail(verifyEmailDto: VerifyEmailDto): Promise<User> {
+  async verifyEmail(verifyEmailDto: VerifyEmailDto) {
     const { email, code } = verifyEmailDto;
 
-    const user = await this.userRepository.findOne({
+    const user = await this.prisma.user.findUnique({
       where: { email },
     });
 
     if (!user) {
-      throw new BadRequestException('User not found');
+      throw new BadRequestException('Пользователь не найден');
     }
 
     if (user.isEmailVerified) {
-      throw new BadRequestException('Email already verified');
+      throw new BadRequestException('Email уже подтвержден');
     }
 
     if (user.verificationCode !== code) {
-      throw new BadRequestException('Invalid verification code');
+      throw new BadRequestException('Неверный код подтверждения');
     }
 
-    if (new Date() > user.verificationCodeExpires) {
-      throw new BadRequestException('Verification code has expired');
+    if (user.verificationCodeExpires && new Date() > user.verificationCodeExpires) {
+      throw new BadRequestException('Срок действия кода подтверждения истек');
     }
 
-    user.isEmailVerified = true;
-    user.verificationCode = null;
-    user.verificationCodeExpires = null;
-
-    return this.userRepository.save(user);
+    return this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        isEmailVerified: true,
+        verificationCode: null,
+        verificationCodeExpires: null,
+      },
+    });
   }
 
   private async sendVerificationEmail(email: string, code: string): Promise<void> {
     await this.transporter.sendMail({
       from: this.configService.get('SMTP_FROM'),
       to: email,
-      subject: 'Email Verification',
+      subject: 'Подтверждение email',
       html: `
-        <h1>Email Verification</h1>
-        <p>Your verification code is: <strong>${code}</strong></p>
-        <p>This code will expire in 10 minutes.</p>
+        <h1>Подтверждение email</h1>
+        <p>Ваш код подтверждения: <strong>${code}</strong></p>
+        <p>Код действителен в течение 10 минут.</p>
       `,
     });
   }
